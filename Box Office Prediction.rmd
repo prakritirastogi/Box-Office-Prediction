@@ -1,0 +1,458 @@
+---
+title: "ML - Final Project v2"
+author: "Prakriti Rastogi, Yuan Chen, Yifang Dong"
+date: "3/15/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Required Packages
+```{r}
+
+library(sqldf)
+library(ISLR)
+library(sjmisc)
+library(dplyr)
+library(standardize)
+library(MASS)
+library(nnet)
+library(ISLR)
+library("neuralnet")
+
+```
+
+Data Preprocessing & EDA
+```{r}
+
+setwd("/Users/Kt/Desktop/BAX 452 - ML - Jorn/Final Project")
+data = read.csv("omdb_df2.csv")
+
+names(data)
+data = data[,-1]
+data$Released = as.Date(data$Released, format="%m/%d/%Y")
+data$Released_year = as.numeric(format(data$Released, "%Y"))
+
+colnames(data) = c("Title", 	"Released", 	"Runtime", 	"Director", 
+                   "Writer", 	"Actors", 	"Plot", 	"Language", 	
+                   "Country", 	"imdbID", 	"BoxOffice", 	"Production", 
+                   "Action", 	"Adventure", 	"Animation", 	"Biography", 
+                   "Comedy", 	"Crime", 	"Drama", 	"Family", 	"Fantasy", 
+                   "History", 	"Horror", 	"Music", 	"Musical", 	"Mystery", 
+                   "Romance", 	"SciFi", 	"Sport", 	"Thriller", 	"War", 
+                   "Western", 	"key_word", 	"holiday", 	"gross_usa", 
+                   "num_of_famous_actor", "num_of_famous_director", "Released_year" )
+
+
+########### Single Variable Analysis
+
+### Runtime
+summary(data$Runtime)
+boxplot(data$Runtime)
+# movie runtime range from about 1 hour to 3 hours. Mean time is about 108 min.
+
+plot(data$Runtime, data$gross_usa)
+# scatterplot shows relationship not linear. But movies with very good boxoffice have time longer
+# that is subpar. 
+
+lm.Runtime <- lm(gross_usa ~ Runtime, data=data)
+summary(lm.Runtime)
+# linear model shows Runtime is significant, relationship positive
+
+
+### number of famous actors
+summary(data$num_of_famous_actor)
+boxplot(data$num_of_famous_actor)
+# movie runtime range from about 1 hour to 3 hours. Mean time is about 108 min.
+
+plot(data$num_of_famous_actor, data$gross_usa)
+
+lm.num_of_famous_actor <- lm(gross_usa ~ num_of_famous_actor, data=data)
+summary(lm.num_of_famous_actor)
+# linear model shows significant, relationship positive
+
+
+### Year of realease
+summary(data$Released)
+
+summary(data$Released_year)
+boxplot(data$Released_year)
+
+plot(data$Released_year, data$gross_usa)
+lm.Released_year <- lm(gross_usa ~ Released_year, data=data)
+summary(lm.Released_year)
+# linear model shows Runtime is not significant, no relationship
+
+### Language
+language_cnt = 0
+for (i in unlist(data["Language"])) {
+  if(str_contains(as.character(i), "English")) {language_cnt <- language_cnt + 1}
+}
+# 979 out of 981 movies has Language English 
+
+# count how many languages each movie has
+cnt_language = list()
+for (i in unlist(data["Language"])) {
+  cnt_language <- append(cnt_language,count.fields(textConnection(as.character(i)), sep = ","))
+}
+
+# insert the new variable count_of_languages into the dataset
+data_Lan <- cbind(data, unlist(cnt_language))
+names(data_Lan)[38] <- "cnt_Language"
+
+summary(data_Lan$cnt_Language)
+boxplot(data_Lan$cnt_Language)
+# most movies are only in English
+
+plot(data_Lan$cnt_Language, data_Lan$gross_usa)
+# no clear pattern. More language not necessarily lead to higher BoxOffice
+
+
+### Country
+country_cnt = 0
+for (i in unlist(data["Country"])) {
+  if(str_contains(as.character(i), "USA")) {country_cnt <- country_cnt + 1}
+}
+country_cnt
+# all movies contain conuntry USA
+
+# count how many countris each movie has
+cnt_country = list()
+for (i in unlist(data["Country"])) {
+  cnt_country <- append(cnt_country,count.fields(textConnection(as.character(i)), sep = ","))
+}
+
+# insert the new variable count_of_countries into the dataset
+data_Cou <- cbind(data_Lan, unlist(cnt_country))
+names(data_Cou)[39] <- "cnt_country"
+
+summary(data_Cou$cnt_country)
+boxplot(data_Cou$cnt_country)
+# most movies are only in English (i.e. has less than 2 languages)
+
+plot(data_Cou$cnt_country, data_Cou$gross_usa)
+# no clear pattern. More countries does not necessarily lead to higher BoxOffice collection
+
+### Production
+# define big production firm as: 1)Warner Bros; 2)Sony; 3)Disney; 4)Universal; 5)20th Century Fox; 6)Paramount
+# create a new dummy whether the production firm is large or not
+data_Pro <- sqldf('select *,
+case when Production like "%Warner Bros%" or Production like "%Sony%" or Production like "%Disney%"
+or Production like "%Universal%" or Production like "%Century%" or Production like "%Paramount%"
+then 1 else 0 end as Big_Production
+from data_Cou')
+
+sum(data_Pro$Big_Production)
+# 350 out of 981 (35%) movies are made by these 6 big names
+
+data_Pro %>% 
+  group_by(Big_Production) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# movies made by big prodiction firms made much more money
+
+##### Genre analysis
+
+### Action
+sum(data_Pro$Action)
+# 261 out of 981 (26%) movies are Action
+data_Pro %>% 
+  group_by(Action) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Actioin movies are profitable (2.8 times compared to others)
+
+### Adventure
+sum(data_Pro$Adventure)
+# 209 out of 981 (21%) movies are Adventure
+data_Pro %>% 
+  group_by(Adventure) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Adventure movies are very profitable (4.8 times compared to others)
+
+### Animation
+sum(data_Pro$Animation)
+# 67 out of 981 (7%) movies are Animation
+data_Pro %>% 
+  group_by(Animation) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Animation movies are profitable (2.8 times compared to others)
+
+### Biography
+sum(data_Pro$Biography)
+# 126 out of 981 (13%) movies are Biography
+data_Pro %>% 
+  group_by(Biography) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Biography movies not very profitable compared to other movies (0.44 times compared to others)
+
+### Comedy
+sum(data_Pro$Comedy)
+# 352 out of 981 (36%) movies are Comedy
+data_Pro %>% 
+  group_by(Comedy) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Comedy movies make same amount of money as compared to others (1:1)
+
+### Crime
+sum(data_Pro$Crime)
+# 164 out of 981 (17%) movies are Crime
+data_Pro %>% 
+  group_by(Crime) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Crime movies not very profitable compared to other movies (0.52 times compared to others)
+
+### Drama
+sum(data_Pro$Drama)
+# 600 out of 981 (61%) movies are Drama
+data_Pro %>% 
+  group_by(Drama) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Drama movies not profitable compared to other movies (0.3 times compared to others)
+
+### Family
+sum(data_Pro$Family)
+# 100 out of 981 (10%) movies are Family
+data_Pro %>% 
+  group_by(Family) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Family movies are profitable (2.8 times compared to others)
+
+### Fantasy
+sum(data_Pro$Fantasy)
+# 134 out of 981 (14%) movies are Fantasy
+data_Pro %>% 
+  group_by(Fantasy) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Fantasy movies are profitable (2.3 times compared to others)
+
+### History
+sum(data_Pro$History)
+# 61 out of 981 (6%) movies are History
+data_Pro %>% 
+  group_by(History) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# History movies not very profitable compared to other movies (0.5 times compared to others)
+
+### Horror
+sum(data_Pro$Horror)
+# 132 out of 981 (13%) movies are horror
+data_Pro %>% 
+  group_by(Horror) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Horror movies not very profitable compared to other movies (0.7 times compared to others)
+
+### Music
+data_Pro$music_a = pmax(data_Pro$Music, data_Pro$Musical)
+
+sum(data_Pro$music_a)
+# 59 out of 981 (6%) movies are music
+data_Pro %>% 
+  group_by(music_a) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+
+
+### Mystery
+sum(data_Pro$Mystery)
+# 138 out of 981 (14%) movies are mystery
+data_Pro %>% 
+  group_by(Mystery) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Mystery movies not very profitable compared to other movies (0.6 times compared to others)
+
+### Romance
+sum(data_Pro$Romance)
+# 154 out of 981 (16%) movies are romance
+data_Pro %>% 
+  group_by(Romance) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Romance movies not very profitable compared to other movies (0.5 times compared to others)
+
+### SciFi
+sum(data_Pro$SciFi)
+# 145 out of 981 (15%) movies are sci-fi
+data_Pro %>% 
+  group_by(SciFi) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# SciFi movies are profitable (3.4 times compared to others)
+
+### Sport
+sum(data_Pro$Sport)
+# 37 out of 981 (4%) movies are sport
+data_Pro %>% 
+  group_by(Sport) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Sport movies not very profitable compared to other movies (0.4 times compared to others)
+
+### Thriller
+sum(data_Pro$Thriller)
+# 302 out of 981 (30%) movies are thriller
+data_Pro %>% 
+  group_by(Thriller) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Thriller movies not very profitable compared to other movies (0.7 times compared to others)
+
+### War
+sum(data_Pro$War)
+# 37 out of 981 (4%) movies are war
+data_Pro %>% 
+  group_by(War) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# War movies not very profitable compared to other movies (0.7 times compared to others)
+
+### Western
+sum(data_Pro$Western)
+# 17 out of 981 (2%) movies are western
+data_Pro %>% 
+  group_by(Western) %>% 
+  summarize(mean_BoxOffice = mean(gross_usa)) 
+# Western movies not very profitable compared to other movies (0.3 times compared to others)
+
+## so Action, Adventure, Animation, Family, Fantasy, Music, SciFi (7 out of 20) makes more money on average
+
+
+
+### Keywords
+all_keywords = list()
+for (i in data["key_word"]) {
+  for (j in strsplit(as.character(i),",")) {
+    all_keywords <- append(all_keywords,j)
+  }
+}
+all_keywords_split <- unlist(all_keywords)
+
+most_common_20_keywords <- sort(table(all_keywords_split),decreasing=TRUE)[1:20]
+keywords_20 <- names(most_common_20_keywords)
+# the list of most common 20 keywords are in list keywords_20
+
+colnames(data)
+
+# add 200 dummy variables that represent keywords to the dataset
+data_with_key <- sqldf('select gross_usa, Runtime, 
+case when Production like "%Warner Bros%" or Production like "%Sony%" or Production like "%Disney%"
+or Production like "%Universal%" or Production like "%Century%" or Production like "%Paramount%"
+then 1 else 0 end as Production, Action, Adventure, Animation,
+Family, Fantasy, music_a, SciFi, num_of_famous_actor,
+case when key_word like "%violence%" then 1 else 0 end violence,
+case when key_word like "%bare chested male%" then 1 else 0 end bare_chested_male,
+case when key_word like "%flashback%" then 1 else 0 end flashback,
+case when key_word like "%death%" then 1 else 0 end death,
+case when key_word like "%murder%" then 1 else 0 end murder,
+case when key_word like "%husband_wife_relationship%" then 1 else 0 end husband_wife_relationship,
+case when key_word like "%no_opening_credits%" then 1 else 0 end no_opening_credits,
+case when key_word like "%photograph%" then 1 else 0 end photograph,
+case when key_word like "%blood%" then 1 else 0 end blood,
+case when key_word like "%slow_motion_scene%" then 1 else 0 end slow_motion_scene,
+case when key_word like "%cell_phone%" then 1 else 0 end cell_phone,
+case when key_word like "%escape%" then 1 else 0 end escape_a,
+case when key_word like "%fear%" then 1 else 0 end fear,
+case when key_word like "%surprise_ending%" then 1 else 0 end surprise_ending,
+case when key_word like "%father_son_relationship%" then 1 else 0 end father_son_relationship,
+case when key_word like "%mother_son_relationship%" then 1 else 0 end mother_son_relationship,
+case when key_word like "%friendship%" then 1 else 0 end friendship,
+case when key_word like "%mother_daughter_relationship%" then 1 else 0 end mother_daughter_relationship,
+case when key_word like "%title_spoken_by_character%" then 1 else 0 end title_spoken_by_character,
+case when key_word like "%f_word%" then 1 else 0 end f_word
+from data_Pro')
+
+
+
+
+```
+
+### Model building
+We will build quintiles for gross boxoffice collections and try to predict it using multinomial regression.
+
+```{r}
+
+quantile(data_with_key$gross_usa, c(.2,.4,.6,.8))
+
+data_with_key$gross_usa_class = ifelse(data_with_key$gross_usa <= 621738, "class_1",
+                                 ifelse(data_with_key$gross_usa <= 7751969, "class_2",
+                                 ifelse(data_with_key$gross_usa <= 30617396, "class_3",
+                                 ifelse(data_with_key$gross_usa <= 72313754, "class_4","class_5"))))
+
+
+
+data_x = scale(data_with_key[,-c(1,32)])
+data_y = as.data.frame(data_with_key[,32], col.names = "gross_usa_class")
+
+smp_siz = floor(0.75*nrow(data_x))
+set.seed(123)
+train_ind = sample(seq_len(nrow(data_x)),size = smp_siz)
+
+train_x = as.data.frame(data_x[train_ind,])
+train_y = as.data.frame(data_y[train_ind,])
+data_train = cbind(train_x, train_y)
+colnames(data_train)[31] = "gross_usa_class"
+
+test_x = as.data.frame(data_x[-train_ind,])
+test_y = as.data.frame(data_y[-train_ind,])
+data_test = cbind(test_x, test_y)
+colnames(data_test)[31] = "gross_usa_class"
+
+
+## Multiple Linear Regression
+fit <- multinom(gross_usa_class ~ ., data = data_train)
+# summary(fit)
+predicted_scores <- predict(fit, data_test, "probs")
+predicted_class <- predict (fit, data_test)
+table(predicted_class, data_test$gross_usa_class)
+pred_mnl = as.data.frame(cbind(data_test$gross_usa_class, predicted_class))
+colnames(pred_mnl)[1] = c("act_class")
+pred_mnl$pred_acc = ifelse(pred_mnl$predicted_class == pred_mnl$act_class, 1, 0)
+sprintf("The accuraacy for multinomial regression is %s percent.", round(sum(pred_mnl$pred_acc)/nrow(pred_mnl)*100, digits = 2))
+
+
+# Stepwise Regression
+step <- stepAIC(fit, direction="both")
+step$anova
+
+fit_step <- multinom(gross_usa_class ~ Runtime + Production + Animation + Family + 
+    music_a + SciFi + num_of_famous_actor + violence + bare_chested_male + 
+    no_opening_credits + photograph + blood + slow_motion_scene + 
+    surprise_ending + friendship, data = data_train)
+# summary(fit_step)
+predicted_scores_step <- predict(fit_step, data_test, "probs")
+predicted_class_step <- predict (fit_step, data_test)
+table(predicted_class_step, data_test$gross_usa_class)
+pred_step = as.data.frame(cbind(data_test$gross_usa_class, predicted_class_step))
+colnames(pred_step)[1] = c("act_class")
+pred_step$pred_acc = ifelse(pred_step$predicted_class_step == pred_step$act_class, 1, 0)
+sprintf("The accuraacy for stepwise multinomial regression is %s percent.", round(sum(pred_step$pred_acc)/nrow(pred_step)*100, digits = 2))
+
+z <- summary(fit_step)$coefficients/summary(fit_step)$standard.errors
+z
+p <- (1 - pnorm(abs(z), 0, 1)) * 2
+p
+
+# fit neural network
+nn = neuralnet(gross_usa_class ~ Runtime + Production + Animation + Family + 
+    music_a + SciFi + num_of_famous_actor + violence + bare_chested_male + 
+    no_opening_credits + photograph + blood + slow_motion_scene + 
+    surprise_ending + friendship, data = data_train,
+                hidden=5, act.fct = "logistic", linear.output = T)
+
+plot(nn)
+
+pred_nn = as.data.frame(predict(nn,data_test))
+colnames(pred_nn) = c("c1","c2","c3","c4","c5")
+pred_nn$max_pr <- pmax(pred_nn$c1, pred_nn$c2, pred_nn$c3, pred_nn$c4, pred_nn$c5)
+
+pred_nn$pred_class = ifelse(pred_nn$max_pr == pred_nn$c1, "class_1",
+                     ifelse(pred_nn$max_pr == pred_nn$c2, "class_2",
+                     ifelse(pred_nn$max_pr == pred_nn$c3, "class_3",
+                     ifelse(pred_nn$max_pr == pred_nn$c4, "class_4","class_5"))))
+
+pred_nn$act_class = data_test$gross_usa_class
+
+pred_nn$pred_acc = ifelse(pred_nn$pred_class == pred_nn$act_class, 1, 0)
+sprintf("The accuraacy for neural net is %s percent.", round(sum(pred_nn$pred_acc)/nrow(pred_nn)*100, digits = 2))
+
+
+```
+
+The stepwise multinomial regression outperforms the other techniques in predicting the range of boxoffice collection on the test dataset.
+
+
+
